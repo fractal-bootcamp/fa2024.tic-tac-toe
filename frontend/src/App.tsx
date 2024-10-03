@@ -1,80 +1,10 @@
-import React, { useState } from "react";
+import React from "react";
 import "./App.css";
+import { useSocketIOGameState } from "./useSocketIOGameState";
+import { BoardState, Player } from "./useGameState";
 
-type Player = "X" | "O";
-type BoardState = (Player | null)[];
 
-const winConditions = [
-  // Rows
-  [0, 1, 2],
-  [3, 4, 5],
-  [6, 7, 8],
-  // Columns
-  [0, 3, 6],
-  [1, 4, 7],
-  [2, 5, 8],
-  // Diagonals
-  [0, 4, 8],
-  [2, 4, 6],
-];
 
-const initialBoardState = [
-  null,
-  null,
-  null,
-  null,
-  null,
-  null,
-  null,
-  null,
-  null,
-];
-
-const checkWinner = (boardState: BoardState): Player | "Draw" | null => {
-  for (const [a, b, c] of winConditions) {
-    if (
-      boardState[a] &&
-      boardState[a] === boardState[b] &&
-      boardState[a] === boardState[c]
-    ) {
-      return boardState[a] as Player;
-    }
-  }
-
-  return boardState.every((cell) => cell !== null) ? "Draw" : null;
-};
-
-const useGameState = () => {
-  const [board, setBoard] = useState<BoardState>(initialBoardState);
-  const [currentPlayer, setCurrentPlayer] = useState<Player>("X");
-  const [winner, setWinner] = useState<Player | "Draw" | null>(null);
-
-  const handleMove = (index: number) => {
-    // don't do anything if the cell is already taken or if there is a winner
-    if (board[index] || winner) return;
-
-    // update the board
-    const newBoard = [...board];
-    newBoard[index] = currentPlayer;
-    setBoard(newBoard);
-
-    // check for a winner
-    const newWinner = checkWinner(newBoard);
-    if (newWinner) {
-      setWinner(newWinner);
-    } else {
-      setCurrentPlayer(currentPlayer === "X" ? "O" : "X");
-    }
-  };
-
-  const resetGame = () => {
-    setBoard(Array(9).fill(null));
-    setCurrentPlayer("X");
-    setWinner(null);
-  };
-
-  return { board, currentPlayer, winner, handleMove, resetGame };
-};
 
 const Cell: React.FC<{ value: Player | null; onClick: () => void }> = ({
   value,
@@ -101,7 +31,7 @@ const Board: React.FC<{
 
 function App() {
   const { board, currentPlayer, winner, handleMove, resetGame } =
-    useGameState();
+    useSocketIOGameState("http://localhost:3001");
 
   return (
     <div className="flex flex-col h-screen items-center justify-center">
