@@ -1,18 +1,19 @@
 import { io, Socket } from "socket.io-client";
 import { useGameState } from "./useGameState";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type SocketMessage =
   | { type: "move"; data: { index: number } }
   | { type: "reset" }
   | {
       type: "state";
-      data: (string | null)[];
+      data: { board: (string | null)[] };
     };
 
 // Create and return the socket instance
-const useSocket = (url: string): Socket | null => {
+const useSocket = (url: string): [Socket | null, boolean] => {
   const socketRef = useRef<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
     socketRef.current = io(url, {
@@ -24,14 +25,17 @@ const useSocket = (url: string): Socket | null => {
 
     socketRef.current.on("connect", () => {
       console.log("Socket.IO connection established");
+      setIsConnected(true);
     });
 
     socketRef.current.on("disconnect", (reason) => {
       console.log(`Socket.IO disconnected: ${reason}`);
+      setIsConnected(false);
     });
 
     socketRef.current.on("connect_error", (error) => {
       console.error("Socket.IO connection error:", error);
+      setIsConnected(false);
     });
 
     return () => {
@@ -39,10 +43,11 @@ const useSocket = (url: string): Socket | null => {
     };
   }, [url]);
 
-  return socketRef.current;
+  return [socketRef.current, isConnected];
 };
+
 const useSocketIO = (url: string) => {
-  const socket = useSocket(url);
+  const [socket, isConnected] = useSocket(url);
 
   const emitMessage = (message: SocketMessage) => {
     if (socket?.connected) {
@@ -54,7 +59,10 @@ const useSocketIO = (url: string) => {
 
   const onMessage = (callback: (message: SocketMessage) => void) => {
     if (socket) {
-      socket.on("game_event", callback);
+      socket.on("game_event", (message) => {
+        console.log("received message", message);
+        callback(message);
+      });
       return () => {
         socket.off("game_event", callback);
       };
@@ -65,21 +73,28 @@ const useSocketIO = (url: string) => {
     emitMove: (index: number) => emitMessage({ type: "move", data: { index } }),
     emitReset: () => emitMessage({ type: "reset" }),
     emitGameState: (board: (string | null)[]) =>
-      emitMessage({ type: "state", data: board }),
+      emitMessage({ type: "state", data: { board } }),
     onMessage,
+    isConnected,
   };
 };
 
 export const useSocketIOGameState = (url: string) => {
   // local state, local actions
-  const { board, currentPlayer, winner, handleMove, resetGame, initializeBoard } =
-    useGameState();
+  const {
+    board,
+    currentPlayer,
+    winner,
+    handleMove,
+    resetGame,
+    initializeBoard,
+  } = useGameState();
 
   // socket actions
-  const { emitMove, emitReset, emitGameState, onMessage } = useSocketIO(url);
+  const { emitMove, emitReset, emitGameState, onMessage, isConnected } = useSocketIO(url);
 
   useEffect(() => {
-    onMessage((message) => {
+    const cleanup = onMessage(async (message) => {
       switch (message.type) {
         case "move":
           handleMove(message.data.index);
@@ -89,13 +104,15 @@ export const useSocketIOGameState = (url: string) => {
           break;
         case "state":
           console.log("received state", message.data);
-          initializeBoard(message.data);
+          initializeBoard(message.data.board);
           break;
-          default:
-            console.warn("unknown message type", message);
+        default:
+          console.warn("unknown message type", message);
       }
     });
-  }, [onMessage, handleMove, resetGame]);
+
+    return cleanup;
+  }, [onMessage, handleMove, resetGame, initializeBoard]);
 
   const handleSocketMove = (index: number) => {
     // make the move on the server
@@ -103,7 +120,7 @@ export const useSocketIOGameState = (url: string) => {
     // make the move on the client
     const newBoard = handleMove(index);
     // send the new board to the server
-    emitGameState(newBoard);
+    emitGameState(newBoard ?? []);
   };
 
   const handleSocketReset = () => {
@@ -119,5 +136,6 @@ export const useSocketIOGameState = (url: string) => {
     winner,
     handleMove: handleSocketMove,
     resetGame: handleSocketReset,
+    isConnected,
   };
 };
