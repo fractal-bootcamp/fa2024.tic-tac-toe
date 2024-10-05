@@ -1,49 +1,65 @@
 import { io, Socket } from "socket.io-client";
 import { useGameState } from "./useGameState";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { BoardState, Player } from "./types";
+
+type GameState = {
+  board: BoardState;
+  currentPlayer: Player;
+  winner: Player | "Draw" | null;
+};
 
 type SocketMessage =
   | { type: "move"; data: { index: number } }
   | { type: "reset" }
-  | {
-      type: "state";
-      data: { board: (string | null)[] };
-    };
+  | { type: "state"; data: GameState };
 
-// Create and return the socket instance
-const useSocket = (url: string): [Socket | null, boolean] => {
-  const socketRef = useRef<Socket | null>(null);
+const createSocket = (url: string): Socket => {
+  const socket = io(url, {
+    transports: ["websocket"],
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000,
+  });
+
+  return socket;
+};
+
+let globalSocket: Socket | null = null;
+
+export const useSocket = (url: string): [Socket | null, boolean] => {
+  const [socketInstance, setSocketInstance] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    socketRef.current = io(url, {
-      transports: ["websocket"],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-    });
+    if (!globalSocket || globalSocket.disconnected) {
+      globalSocket = createSocket(url);
+      setSocketInstance(globalSocket);
 
-    socketRef.current.on("connect", () => {
-      console.log("Socket.IO connection established");
-      setIsConnected(true);
-    });
+      globalSocket.on("connect", () => {
+        console.log("Socket.IO connection established");
+        setIsConnected(true);
+      });
 
-    socketRef.current.on("disconnect", (reason) => {
-      console.log(`Socket.IO disconnected: ${reason}`);
-      setIsConnected(false);
-    });
+      globalSocket.on("disconnect", (reason) => {
+        console.log(`Socket.IO disconnected: ${reason}`);
+        setIsConnected(false);
+      });
 
-    socketRef.current.on("connect_error", (error) => {
-      console.error("Socket.IO connection error:", error);
-      setIsConnected(false);
-    });
+      globalSocket.on("connect_error", (error) => {
+        console.error("Socket.IO connection error:", error);
+        setIsConnected(false);
+      });
+    }
 
     return () => {
-      socketRef.current?.disconnect();
+      if (globalSocket) {
+        globalSocket.disconnect();
+      }
     };
   }, [url]);
 
-  return [socketRef.current, isConnected];
+  return [socketInstance, isConnected];
 };
 
 const useSocketIO = (url: string) => {
@@ -54,6 +70,14 @@ const useSocketIO = (url: string) => {
       socket.emit("game_event", message);
     } else {
       console.warn("Socket not connected. Message not sent:", message);
+    }
+  };
+
+  const emitJoin = (roomId: string) => {
+    if (socket?.connected) {
+      socket.emit("join_room", roomId);
+    } else {
+      console.warn("Socket not connected. Join not sent:", roomId);
     }
   };
 
@@ -72,70 +96,49 @@ const useSocketIO = (url: string) => {
   return {
     emitMove: (index: number) => emitMessage({ type: "move", data: { index } }),
     emitReset: () => emitMessage({ type: "reset" }),
-    emitGameState: (board: (string | null)[]) =>
-      emitMessage({ type: "state", data: { board } }),
+    emitJoin: (roomId: string) => emitJoin(roomId),
     onMessage,
     isConnected,
   };
 };
 
-export const useSocketIOGameState = (url: string) => {
-  // local state, local actions
-  const {
-    board,
-    currentPlayer,
-    winner,
-    handleMove,
-    resetGame,
-    initializeBoard,
-  } = useGameState();
-
-  // socket actions
-  const { emitMove, emitReset, emitGameState, onMessage, isConnected } = useSocketIO(url);
+export const useSocketIOGameState = (url: string, roomId: string) => {
+  const { board, currentPlayer, winner, updateGameState } = useGameState();
+  const { emitMove, emitReset, emitJoin, onMessage, isConnected } =
+    useSocketIO(url);
 
   useEffect(() => {
-    const cleanup = onMessage(async (message) => {
-      switch (message.type) {
-        case "move":
-          handleMove(message.data.index);
-          break;
-        case "reset":
-          resetGame();
-          break;
-        case "state":
-          console.log("received state", message.data);
-          initializeBoard(message.data.board);
-          break;
-        default:
-          console.warn("unknown message type", message);
+    console.log("socketConnected", isConnected, roomId);
+    if (isConnected && roomId) {
+      console.log("emitting join_room", roomId);
+      emitJoin(roomId);
+    }
+  }, [isConnected, roomId]);
+
+  useEffect(() => {
+    const cleanup = onMessage((message) => {
+      if (message.type === "state") {
+        updateGameState(message.data);
       }
     });
 
     return cleanup;
-  }, [onMessage, handleMove, resetGame, initializeBoard]);
+  }, [onMessage, updateGameState]);
 
-  const handleSocketMove = (index: number) => {
-    // make the move on the server
+  const handleMove = (index: number) => {
     emitMove(index);
-    // make the move on the client
-    const newBoard = handleMove(index);
-    // send the new board to the server
-    emitGameState(newBoard ?? []);
   };
 
-  const handleSocketReset = () => {
-    // reset the game on the server
+  const resetGame = () => {
     emitReset();
-    // reset the game on the client
-    resetGame();
   };
 
   return {
     board,
     currentPlayer,
     winner,
-    handleMove: handleSocketMove,
-    resetGame: handleSocketReset,
+    handleMove,
+    resetGame,
     isConnected,
   };
 };

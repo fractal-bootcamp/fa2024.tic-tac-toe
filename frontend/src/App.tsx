@@ -1,10 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import "./App.css";
-import { useSocketIOGameState } from "./useSocketIOGameState";
-import { BoardState, Player } from "./useGameState";
-
-
-
+import { useSocket, useSocketIOGameState } from "./useSocketIOGameState";
+import { BoardState, Player } from "./types";
+import { Navigate, useParams } from "react-router-dom";
 
 const Cell: React.FC<{ value: Player | null; onClick: () => void }> = ({
   value,
@@ -29,20 +27,6 @@ const Board: React.FC<{
   </div>
 );
 
-function App() {
-  const { board, currentPlayer, winner, handleMove, resetGame } =
-    useSocketIOGameState("http://localhost:3001");
-
-  return (
-    <div className="flex flex-col h-screen items-center justify-center">
-      <h1 className="font-bold mb-4 text-3xl">Tic Tac Toe</h1>
-      <Board board={board} onCellClick={handleMove} />
-      <StatusMessage winner={winner} currentPlayer={currentPlayer} />
-      <ResetButton onClick={resetGame} />
-    </div>
-  );
-}
-
 const StatusMessage: React.FC<{
   winner: Player | "Draw" | null;
   currentPlayer: Player;
@@ -65,5 +49,67 @@ const ResetButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
     Reset Game
   </button>
 );
+
+const RoomInput: React.FC<{ onJoinRoom: (roomId: string) => void }> = ({
+  onJoinRoom,
+}) => {
+  const [roomId, setRoomId] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (roomId.trim()) {
+      onJoinRoom(roomId.trim());
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mb-4">
+      <input
+        type="text"
+        value={roomId}
+        onChange={(e) => setRoomId(e.target.value)}
+        placeholder="Enter Room ID"
+        className="border border-gray-300 px-2 py-1 rounded mr-2"
+      />
+      <button
+        type="submit"
+        className="bg-green-500 text-white px-4 py-1 rounded"
+      >
+        Join Room
+      </button>
+    </form>
+  );
+};
+
+function App({ roomId }: { roomId: string }) {
+  const { board, currentPlayer, winner, handleMove, resetGame, isConnected } =
+    useSocketIOGameState("http://localhost:3001", roomId);
+
+   
+
+  return (
+    <div className="flex flex-col h-screen items-center justify-center">
+      <h1 className="font-bold mb-4 text-3xl">Tic Tac Toe</h1>
+      <p className="mb-4">Room: {roomId}</p>
+      <p className="mb-4">
+        Connection status: {isConnected ? "Connected" : "Disconnected"}
+      </p>
+      <Board board={board} onCellClick={handleMove} />
+      <StatusMessage winner={winner} currentPlayer={currentPlayer} />
+      <ResetButton onClick={resetGame} />
+    </div>
+  );
+}
+
+
+export const AppWithParams = () => {
+  const { roomId } = useParams<{ roomId: string }>();
+
+  if (!roomId) {
+    return <Navigate to="/" />;
+  }
+
+  return <App roomId={roomId} />;
+}
 
 export default App;
